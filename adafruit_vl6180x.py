@@ -27,6 +27,7 @@ Implementation Notes
 """
 import struct
 import time
+from datetime import datetime, timedelta
 
 from micropython import const
 
@@ -122,6 +123,24 @@ class VL6180X:
         # Activate history buffer for range measurement
         self._write_8(_VL6180X_REG_SYSTEM_HISTORY_CTRL, 0x01)
 
+        self._read_timeout = timedelta(seconds=0.0)
+
+    @property
+    def read_timeout(self) -> timedelta:
+        """The time to wait at most when reading the range (0 means not timeout)"""
+        return self._read_timeout
+
+    @read_timeout.setter
+    def read_timeout(self, timeout: timedelta) -> None:
+        """Set the time to wait at most when reading the range
+
+        Parameters
+        ----------
+        timeout : timedelta
+            The time to wait at most when reading the range (0 means not timeout)
+        """
+        self._read_timeout = timeout
+
     @property
     def range(self) -> int:
         """Read the range of an object in front of sensor and return it in mm."""
@@ -211,16 +230,34 @@ class VL6180X:
 
     def _read_range_single(self) -> int:
         """Read the range when in single-shot mode"""
-        while not self._read_8(_VL6180X_REG_RESULT_RANGE_STATUS) & 0x01:
+        end = (
+            (datetime.now() + self._read_timeout)
+            if self._read_timeout.total_seconds() > 0
+            else None
+        )
+
+        # Poll until bit 0 is set or timeout occurs
+        while not self._read_8(_VL6180X_REG_RESULT_RANGE_STATUS) & 0x01 and (
+            (end is None) or (end is not None and datetime.now() < end)
+        ):
             pass
+
         self._write_8(_VL6180X_REG_SYSRANGE_START, 0x01)
         return self._read_range_continuous()
 
     def _read_range_continuous(self) -> int:
         """Read the range when in continuous mode"""
 
-        # Poll until bit 2 is set
-        while not self._read_8(_VL6180X_REG_RESULT_INTERRUPT_STATUS_GPIO) & 0x04:
+        end = (
+            (datetime.now() + self._read_timeout)
+            if self._read_timeout.total_seconds() > 0
+            else None
+        )
+
+        # Poll until bit 2 is set or timeout occurs
+        while not self._read_8(_VL6180X_REG_RESULT_INTERRUPT_STATUS_GPIO) & 0x04 and (
+            (end is None) or (end is not None and datetime.now() < end)
+        ):
             pass
 
         # read range in mm
