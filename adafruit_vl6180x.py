@@ -25,6 +25,7 @@ Implementation Notes
   https://github.com/adafruit/circuitpython/releases
 * Adafruit's Bus Device library: https://github.com/adafruit/Adafruit_CircuitPython_BusDevice
 """
+import logging
 import struct
 import time
 from datetime import datetime, timedelta
@@ -91,6 +92,8 @@ ERROR_RAWOFLOW = const(13)
 ERROR_RANGEUFLOW = const(14)
 ERROR_RANGEOFLOW = const(15)
 
+logger = logging.getLogger(__name__)
+
 
 class VL6180X:
     """Create an instance of the VL6180X distance sensor. You must pass in
@@ -139,6 +142,7 @@ class VL6180X:
         timeout : timedelta
             The time to wait at most when reading the range (0 means not timeout)
         """
+        logger.debug(f"setting read timeout {timeout!r}")
         self._read_timeout = timeout
 
     @property
@@ -230,10 +234,16 @@ class VL6180X:
 
     def _read_range_single(self) -> int:
         """Read the range when in single-shot mode"""
+        logger.debug(f"_read_range_single enter")
         end = (
             (datetime.now() + self._read_timeout)
             if self._read_timeout.total_seconds() > 0
             else None
+        )
+        logger.debug(f"{self._read_timeout=}, {end=}")
+        result_range_status = self._read_8(_VL6180X_REG_RESULT_RANGE_STATUS)
+        logger.debug(
+            f"before poll {result_range_status=:b} (binary), bit 0: {bool(result_range_status & 0x01)} (want True)"
         )
 
         # Poll until bit 0 is set or timeout occurs
@@ -242,16 +252,33 @@ class VL6180X:
         ):
             pass
 
+        result_range_status = self._read_8(_VL6180X_REG_RESULT_RANGE_STATUS)
+        logger.debug(
+            f"after poll {result_range_status=:b} (binary), bit 0: {bool(result_range_status & 0x01)} (want True)"
+        )
+        logger.debug(
+            f"{datetime.now()=}, timeout occurred? {(datetime.now() >= end) if end is not None else None}"
+        )
+
         self._write_8(_VL6180X_REG_SYSRANGE_START, 0x01)
+        logger.debug(f"written _VL6180X_REG_SYSRANGE_START")
+
         return self._read_range_continuous()
 
     def _read_range_continuous(self) -> int:
         """Read the range when in continuous mode"""
 
+        logger.debug(f"_read_range_cont enter")
         end = (
             (datetime.now() + self._read_timeout)
             if self._read_timeout.total_seconds() > 0
             else None
+        )
+        logger.debug(f"{self._read_timeout=}, {end=}")
+
+        interrupt_status = self._read_8(_VL6180X_REG_RESULT_INTERRUPT_STATUS_GPIO)
+        logger.debug(
+            f"before poll {interrupt_status=:b} (binary), bit 2: {bool(interrupt_status & 0x04)} (want True)"
         )
 
         # Poll until bit 2 is set or timeout occurs
@@ -260,11 +287,21 @@ class VL6180X:
         ):
             pass
 
+        interrupt_status = self._read_8(_VL6180X_REG_RESULT_INTERRUPT_STATUS_GPIO)
+        logger.debug(
+            f"after poll {interrupt_status=:b} (binary), bit 2: {bool(interrupt_status & 0x04)} (want True)"
+        )
+        logger.debug(
+            f"{datetime.now()=}, timeout occurred? {(datetime.now() >= end) if end is not None else None}"
+        )
+
         # read range in mm
         range_ = self._read_8(_VL6180X_REG_RESULT_RANGE_VAL)
+        logger.debug(f"{range_=}")
 
         # clear interrupt
         self._write_8(_VL6180X_REG_SYSTEM_INTERRUPT_CLEAR, 0x07)
+        logger.debug("interrupt cleared")
 
         return range_
 
